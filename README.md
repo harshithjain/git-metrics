@@ -4,7 +4,7 @@ This project fetches various metrics from a GitHub repository and provides a **R
 - Total lines of code
 - Average commits per day
 - Total coding days
-- Commits per day for the last 7 days
+- Commits per day for the last X days
 - User-specific metrics like lines added, lines removed, and files changed
 
 ## Setup
