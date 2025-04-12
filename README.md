@@ -37,9 +37,9 @@ This project fetches various metrics from a GitHub repository and provides a **R
 ### UI Setup
 The React-based UI displays the metrics in a table format and includes a **Refresh** button to regenerate the metrics.
 
-1. Navigate to the `metrics-ui` directory:
+1. Navigate to the `web` directory:
    ```bash
-   cd metrics-ui
+   cd web
    ```
 
 2. Install the required dependencies:
@@ -102,7 +102,7 @@ The metrics are saved in the `metrics_output` directory as:
 ├── backend.py                # Flask backend to fetch and refresh metrics
 ├── github_metrics.py         # Script to fetch metrics from GitHub
 ├── metrics_output/           # Directory where metrics CSV files are saved
-├── metrics-ui/               # React-based UI for displaying metrics
+├── web/               # React-based UI for displaying metrics
 │   ├── src/
 │   │   ├── App.js            # Main React component
 │   │   ├── index.js          # React entry point
