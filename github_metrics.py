@@ -1,15 +1,18 @@
 from github import Github
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone, timedelta
 import os
 from dotenv import load_dotenv
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
-import sys
+import argparse
 import shutil
 
 # Load environment variables
 load_dotenv()
+
+METRICS_DIR = "metrics_output"
+OVERALL_METRICS_FILE = os.path.join(METRICS_DIR, "overall_metrics.csv")
 
 def clean_output_directory(output_dir):
     """
@@ -22,31 +25,31 @@ def clean_output_directory(output_dir):
         shutil.rmtree(output_dir)  # Remove the directory and all its contents
     os.makedirs(output_dir, exist_ok=True)  # Recreate the directory
 
-def get_recent_branches(repo, days=220):
+def get_recent_branches(repo, start_date, end_date):
     """
-    Fetch branches updated within the last `days` days.
+    Fetch branches updated within the specified date range.
 
     Args:
         repo: GitHub repository object.
-        days: Number of days to look back for recent branches.
+        start_date: Start date for filtering activity.
+        end_date: End date for filtering activity.
 
     Returns:
         List of branch objects updated within the specified time frame.
     """
     recent_branches = []
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
 
     for branch in repo.get_branches():
         try:
             # Get the last commit date for the branch
             last_commit = branch.commit.commit.author.date
-            if last_commit >= cutoff_date:
+            if start_date <= last_commit <= end_date:
                 recent_branches.append(branch)
         except Exception as e:
             print(f"Warning: Could not process branch {branch.name}: {str(e)}")
             continue
 
-    print(f"Found {len(recent_branches)} branches updated in the last {days} days")
+    print(f"Found {len(recent_branches)} branches updated between {start_date} and {end_date}")
     return recent_branches
 
 def process_branch(branch, repo, start_date, end_date, processed_commits):
@@ -122,7 +125,9 @@ def get_all_user_metrics(repo, start_date, end_date):
     Returns:
         A dictionary containing metrics for all users.
     """
-    branches = get_recent_branches(repo, days=90)
+
+    print("Inside get_all_user_metrics")
+    branches = get_recent_branches(repo, start_date, end_date)
     all_user_metrics = defaultdict(lambda: {
         "commits": 0,
         "files_changed": set(),
@@ -148,87 +153,47 @@ def get_all_user_metrics(repo, start_date, end_date):
 
     return all_user_metrics
 
-def save_all_user_metrics_to_csv(all_user_metrics, output_dir):
+def calculate_metrics(from_date, to_date):
     """
-    Save metrics for all users to CSV files.
-
-    Args:
-        all_user_metrics: Dictionary containing metrics for all users.
-        output_dir: Directory to save the CSV files.
+    Calculate metrics based on the date range and save to a CSV file.
     """
-    os.makedirs(output_dir, exist_ok=True)
+    token = os.getenv("GITHUB_TOKEN")
+    repo_name = os.getenv("GITHUB_REPO", "owner/repo")
 
-    # Save overall metrics
-    overall_data = []
-    for user, metrics in all_user_metrics.items():
-        overall_data.append({
+    # Initialize GitHub client
+    g = Github(token)
+    repo = g.get_repo(repo_name)
+
+    # Get metrics for all users
+    all_user_metrics = get_all_user_metrics(repo, from_date, to_date)
+
+    # Format the metrics into a DataFrame
+    metrics = []
+    for user, data in all_user_metrics.items():
+        metrics.append({
             "User": user,
-            "Total Coding Days": len(metrics["coding_days"]),
-            "Total Commits": metrics["commits"],
-            "Files Changed": len(metrics["files_changed"]),
-            "Lines Added": metrics["lines_added"],
-            "Lines Removed": metrics["lines_removed"]
+            "Total Coding Days": len(data["coding_days"]),
+            "Total Commits": data["commits"],
+            "Files Changed": len(data["files_changed"]),
+            "Lines Added": data["lines_added"],
+            "Lines Removed": data["lines_removed"]
         })
-    overall_df = pd.DataFrame(overall_data)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    overall_df.to_csv(f"{output_dir}/overall_metrics", index=False)
 
-    # Save commits per day
-    commits_per_day_data = []
-    for user, metrics in all_user_metrics.items():
-        for date, count in metrics["commits_per_day"].items():
-            commits_per_day_data.append({
-                "User": user,
-                "Date": date,
-                "Commits": count
-            })
-    commits_per_day_df = pd.DataFrame(commits_per_day_data)
-    commits_per_day_df.to_csv(f"{output_dir}/commits_per_day.csv", index=False)
-
-    print(f"Metrics for all users have been saved to '{output_dir}'")
-
-def get_github_metrics(repo_name, token):
-    """
-    Get various metrics from a GitHub repository for all users.
-
-    Args:
-        repo_name (str): Repository name in format 'owner/repo'.
-        token (str): GitHub personal access token.
-    """
-    if not token:
-        print("Error: GitHub token is required for private/internal repositories")
-        print("Please set GITHUB_TOKEN in your .env file")
-        sys.exit(1)
-
-    try:
-        # Initialize GitHub client with token
-        g = Github(token)
-
-        # Access the repository
-        repo = g.get_repo(repo_name)
-        print(f"Successfully accessed repository: {repo.full_name}")
-
-        # Clean the output directory
-        output_dir = "metrics_output"
-        clean_output_directory(output_dir)
-
-        # Calculate date range for the last 220 days
-        end_date = datetime.now(timezone.utc)
-        start_date = end_date - timedelta(days=220)
-        print(f"\nAnalyzing metrics for all users from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
-
-        # Get metrics for all users
-        all_user_metrics = get_all_user_metrics(repo, start_date, end_date)
-
-        # Save metrics to CSV
-        save_all_user_metrics_to_csv(all_user_metrics, output_dir=output_dir)
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        sys.exit(1)
+    # Save metrics to a CSV file
+    os.makedirs(METRICS_DIR, exist_ok=True)
+    df = pd.DataFrame(metrics)
+    df.to_csv(OVERALL_METRICS_FILE, index=False)
+    print(f"Metrics saved to {OVERALL_METRICS_FILE}")
 
 if __name__ == "__main__":
-    # Get repository name and token from environment variables
-    repo_name = os.getenv("GITHUB_REPO", "owner/repo")
-    token = os.getenv("GITHUB_TOKEN")
+    parser = argparse.ArgumentParser(description="Calculate GitHub metrics.")
+    parser.add_argument("--from-date", required=True, help="Start date (YYYY-MM-DD)")
+    parser.add_argument("--to-date", required=True, help="End date (YYYY-MM-DD)")
+    args = parser.parse_args()
 
-    get_github_metrics(repo_name, token)
+    # Parse the date range
+    from_date = datetime.strptime(args.from_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+    to_date = datetime.strptime(args.to_date, '%Y-%m-%d').replace(tzinfo=timezone.utc) + timedelta(hours=23, minutes=59, seconds=59)
+
+    # Calculate metrics
+    calculate_metrics(from_date, to_date)
